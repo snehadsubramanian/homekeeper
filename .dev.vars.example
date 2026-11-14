@@ -1,0 +1,11 @@
+# Copy to .dev.vars (git-ignored) and fill in real values for local development.
+# In production, set the first three as Cloudflare variables and the last two
+# with `npx wrangler secret put <NAME>`.
+
+APP_BASE_URL=http://localhost:8787
+ALLOWED_EMAILS=you@example.com,partner@example.com
+GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+
+GOOGLE_CLIENT_SECRET=replace-me
+# Generate with: openssl rand -base64 32
+SESSION_KEY=replace-me

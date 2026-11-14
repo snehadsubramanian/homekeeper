@@ -4,6 +4,9 @@
   "main": "src/index.tsx",
   "compatibility_date": "2026-08-15",
   "compatibility_flags": ["nodejs_compat"],
+  // APP_BASE_URL, ALLOWED_EMAILS and GOOGLE_CLIENT_ID are set in the Cloudflare
+  // dashboard, not here (this repo is public). Keep them across deploys.
+  "keep_vars": true,
   "d1_databases": [
     {
       "binding": "DB",

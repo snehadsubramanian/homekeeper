@@ -21,3 +21,6 @@ coverage/
 # OS and editor clutter
 .DS_Store
 *.log
+
+# Example local config (placeholders only) is safe to commit
+!.dev.vars.example
