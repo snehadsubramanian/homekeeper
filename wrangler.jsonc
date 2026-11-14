@@ -1,0 +1,15 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "homekeeper",
+  "main": "src/index.tsx",
+  "compatibility_date": "2026-08-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "duties-db",
+      "database_id": "590e8a3c-563f-4614-aebf-501a0e39f8d0",
+      "migrations_dir": "migrations"
+    }
+  ]
+}

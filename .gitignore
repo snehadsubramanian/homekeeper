@@ -1,6 +1,9 @@
 # Local design docs (personal; never commit)
 docs/
 
+# Claude files
+CLAUDE.md
+
 # Dependencies and build output
 node_modules/
 dist/
