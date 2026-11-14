@@ -88,10 +88,20 @@ describe("signed-out visitors", () => {
     expect(res.headers.get("location")).toBe("/signin");
   });
 
-  it("see a sign-in page that links to Google sign-in", async () => {
+  it("see a sign-in page that links to Google sign-in and the privacy policy", async () => {
     const res = await app.request("/signin", {}, env);
     expect(res.status).toBe(200);
-    expect(await res.text()).toContain('href="/auth/login"');
+    const html = await res.text();
+    expect(html).toContain('href="/auth/login"');
+    expect(html).toContain('href="/privacy"');
+  });
+
+  it("can read the privacy policy without signing in", async () => {
+    const res = await app.request("/privacy", {}, env);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("Privacy policy");
+    expect(html).toContain("Google API Services User Data Policy");
   });
 });
 

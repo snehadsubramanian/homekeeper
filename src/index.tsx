@@ -1,12 +1,13 @@
 import { Hono } from "hono";
 import { type AppContext, auth, requireUser } from "./auth";
-import { HomePage, SignInPage } from "./pages";
+import { HomePage, PrivacyPage, SignInPage } from "./pages";
 import { csrfToken } from "./session";
 
 const app = new Hono<AppContext>();
 
-// Public routes: the sign-in page and the sign-in flow itself.
+// Public routes: the sign-in page, the privacy policy and the sign-in flow itself.
 app.get("/signin", (c) => c.html(<SignInPage />));
+app.get("/privacy", (c) => c.html(<PrivacyPage />));
 app.route("/auth", auth);
 
 // Everything below needs a signed-in, allow-listed user.
