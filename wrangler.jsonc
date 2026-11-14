@@ -1,12 +1,20 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "homekeeper",
-  "main": "src/index.tsx",
+  "main": "src/index.ts",
   "compatibility_date": "2026-08-15",
   "compatibility_flags": ["nodejs_compat"],
   // APP_BASE_URL, ALLOWED_EMAILS and GOOGLE_CLIENT_ID are set in the Cloudflare
   // dashboard, not here (this repo is public). Keep them across deploys.
   "keep_vars": true,
+  "vars": {
+    // The Google Tasks list the app owns. Use the dev list until real use begins.
+    "TASKLIST_NAME": "Household duties (dev)"
+  },
+  "triggers": {
+    // 09:00 UTC daily (5 a.m. EDT / 4 a.m. EST)
+    "crons": ["0 9 * * *"]
+  },
   "d1_databases": [
     {
       "binding": "DB",

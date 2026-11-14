@@ -13,6 +13,10 @@ export interface AppVars {
   GOOGLE_CLIENT_SECRET: string;
   /** Secret. Signs session cookies and CSRF tokens. */
   SESSION_KEY: string;
+  /** Secret. Base64 of 32 random bytes; encrypts Google refresh tokens (AES-GCM). */
+  TOKEN_ENC_KEY: string;
+  /** Name of the Google Tasks list the app owns. Set in wrangler.jsonc. */
+  TASKLIST_NAME: string;
 }
 
 export type AppEnv = Env & AppVars;

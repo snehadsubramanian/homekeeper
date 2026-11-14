@@ -1,13 +1,15 @@
 /**
- * Google sign-in (OAuth 2.0 authorization-code flow with PKCE), called with
- * plain fetch. Step 2a asks only for identity; later steps add the Tasks scope.
+ * Google sign-in (OAuth 2.0 authorization-code flow with PKCE) and token
+ * refresh, called with plain fetch.
  */
 import type { AppEnv } from "./env";
 
 const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const ISSUERS = new Set(["https://accounts.google.com", "accounts.google.com"]);
-export const SIGN_IN_SCOPES = "openid email profile";
+
+export const TASKS_SCOPE = "https://www.googleapis.com/auth/tasks";
+export const SIGN_IN_SCOPES = `openid email profile ${TASKS_SCOPE}`;
 
 export function redirectUri(env: AppEnv): string {
   return new URL("/auth/callback", env.APP_BASE_URL).toString();
@@ -20,10 +22,12 @@ export function authorizationUrl(env: AppEnv, state: string, codeChallenge: stri
     redirect_uri: redirectUri(env),
     response_type: "code",
     scope: SIGN_IN_SCOPES,
+    // offline + consent makes Google return a refresh token on every sign-in.
+    access_type: "offline",
+    prompt: "select_account consent",
     state,
     code_challenge: codeChallenge,
     code_challenge_method: "S256",
-    prompt: "select_account",
   }).toString();
   return url.toString();
 }
@@ -35,10 +39,29 @@ export interface GoogleIdentity {
   name: string | null;
 }
 
+export interface SignInResult {
+  identity: GoogleIdentity;
+  accessToken: string;
+  /** Null if Google didn't send one this time. */
+  refreshToken: string | null;
+  grantedScopes: Set<string>;
+}
+
+/** The sign-in response was missing, malformed or not meant for this app. */
 export class GoogleSignInError extends Error {}
 
-/** Exchanges the authorization code and returns the signed-in identity. */
-export async function exchangeCode(env: AppEnv, code: string, codeVerifier: string): Promise<GoogleIdentity> {
+/** A Google API call failed. Never includes token values in its message. */
+export class GoogleApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+/** Exchanges the authorization code for tokens and the signed-in identity. */
+export async function exchangeCode(env: AppEnv, code: string, codeVerifier: string): Promise<SignInResult> {
   const res = await fetch(TOKEN_URL, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -53,9 +76,39 @@ export async function exchangeCode(env: AppEnv, code: string, codeVerifier: stri
   });
   if (!res.ok) throw new GoogleSignInError(`token endpoint returned ${res.status}`);
 
-  const body = (await res.json()) as { id_token?: string };
-  if (!body.id_token) throw new GoogleSignInError("no id_token in token response");
-  return identityFromIdToken(env, body.id_token);
+  const body = (await res.json()) as {
+    id_token?: string;
+    access_token?: string;
+    refresh_token?: string;
+    scope?: string;
+  };
+  if (!body.id_token || !body.access_token) throw new GoogleSignInError("incomplete token response");
+
+  return {
+    identity: identityFromIdToken(env, body.id_token),
+    accessToken: body.access_token,
+    refreshToken: body.refresh_token ?? null,
+    grantedScopes: new Set((body.scope ?? "").split(" ").filter(Boolean)),
+  };
+}
+
+/** Trades a stored refresh token for a short-lived access token. */
+export async function refreshAccessToken(env: AppEnv, refreshToken: string): Promise<string> {
+  const res = await fetch(TOKEN_URL, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: env.GOOGLE_CLIENT_ID,
+      client_secret: env.GOOGLE_CLIENT_SECRET,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+    }).toString(),
+  });
+  const body = (await res.json().catch(() => ({}))) as { access_token?: string; error?: string };
+  if (!res.ok || !body.access_token) {
+    throw new GoogleApiError(`token refresh failed: ${body.error ?? `HTTP ${res.status}`}`, res.status);
+  }
+  return body.access_token;
 }
 
 /**

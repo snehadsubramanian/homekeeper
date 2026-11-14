@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import app from "../src/index";
+import app from "../src/app";
 
 describe("skeleton", () => {
   it("serves an HTML page", async () => {
@@ -16,6 +16,6 @@ describe("skeleton", () => {
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name <> 'd1_migrations' ORDER BY name",
     ).all();
 
-    expect(results).toEqual([{ name: "users" }]);
+    expect(results).toEqual([{ name: "job_runs" }, { name: "users" }]);
   });
 });
