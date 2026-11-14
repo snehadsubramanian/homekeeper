@@ -1,6 +1,7 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
+import { isAllowed } from "./allowlist";
 import { encryptToken } from "./crypto";
 import type { AppEnv } from "./env";
 import { authorizationUrl, exchangeCode, GoogleApiError, GoogleSignInError, TASKS_SCOPE } from "./google";
@@ -27,11 +28,6 @@ export type AppContext = { Bindings: AppEnv; Variables: { user: User } };
 
 const STATE_COOKIE = "oauth_state";
 const COOKIE_BASE = { httpOnly: true, secure: true, sameSite: "Lax" } as const;
-
-export function isAllowed(env: AppEnv, email: string): boolean {
-  const allowed = env.ALLOWED_EMAILS.split(",").map((e) => e.trim().toLowerCase());
-  return allowed.includes(email.trim().toLowerCase());
-}
 
 /** The signed-in user, or null if the cookie is missing, invalid, expired or no longer allowed. */
 export async function currentUser(c: Context<AppContext>): Promise<User | null> {

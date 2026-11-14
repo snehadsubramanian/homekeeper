@@ -79,6 +79,22 @@ describe("daily token refresh", () => {
     expect(run).toMatchObject({ ok: 1, error: null });
   });
 
+  it("leaves alone anyone who has been removed from the allow-list", async () => {
+    const google = fakeGoogle({ lists: [{ id: "list-a", title: "x" }] });
+    await insertUser({ sub: "google-sub-alex", refreshToken: "rt-alex", tasklistId: "list-a" });
+    await insertUser({ email: "removed@example.net", sub: "google-sub-removed", refreshToken: "rt-removed", tasklistId: "list-a" });
+
+    await runTokenRefresh(env);
+
+    const used = google.calls
+      .filter((c) => c.url.href === "https://oauth2.googleapis.com/token")
+      .map((c) => new URLSearchParams(c.body).get("refresh_token"));
+    expect(used).toEqual(["rt-alex"]);
+    expect(google.calls.some((c) => c.authorization === "Bearer access-for-rt-removed")).toBe(false);
+    const [run] = await jobRuns();
+    expect(run).toMatchObject({ ok: 1, error: null });
+  });
+
   it("is safe to run twice", async () => {
     fakeGoogle({ lists: [{ id: "list-a", title: "x" }] });
     await insertUser({ refreshToken: "rt-alex", tasklistId: "list-a" });

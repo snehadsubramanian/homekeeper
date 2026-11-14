@@ -2,6 +2,7 @@
  * Background jobs, run from the Worker's cron trigger. Each run is logged in
  * job_runs, and every job is safe to re-run.
  */
+import { isAllowed } from "./allowlist";
 import { decryptToken } from "./crypto";
 import type { AppEnv } from "./env";
 import { GoogleApiError, refreshAccessToken } from "./google";
@@ -23,10 +24,12 @@ export async function runTokenRefresh(env: AppEnv): Promise<void> {
 
   try {
     const { results: users } = await env.DB.prepare(
-      "SELECT id, google_sub, refresh_token_enc, tasklist_id FROM users WHERE refresh_token_enc IS NOT NULL ORDER BY id",
-    ).all<{ id: number; google_sub: string; refresh_token_enc: string; tasklist_id: string | null }>();
+      "SELECT id, email, google_sub, refresh_token_enc, tasklist_id FROM users WHERE refresh_token_enc IS NOT NULL ORDER BY id",
+    ).all<{ id: number; email: string; google_sub: string; refresh_token_enc: string; tasklist_id: string | null }>();
 
     for (const user of users) {
+      // Someone removed from the allow-list keeps their row, but the app stops using their Google access.
+      if (!isAllowed(env, user.email)) continue;
       try {
         const refreshToken = await decryptToken(env.TOKEN_ENC_KEY, user.refresh_token_enc, user.google_sub);
         const accessToken = await refreshAccessToken(env, refreshToken);
