@@ -45,6 +45,21 @@ export interface FakeGoogleOptions {
   tasksStatus?: number;
   /** Refresh tokens that Google rejects, mapped to the OAuth error code. */
   refreshErrors?: Record<string, string>;
+  /** Tasks in each list, keyed by list id. */
+  tasks?: Record<string, FakeTask[]>;
+}
+
+/** A task as the Google Tasks API returns it. */
+export interface FakeTask {
+  id: string;
+  title?: string;
+  notes?: string;
+  status?: string;
+  due?: string;
+  completed?: string;
+  deleted?: boolean;
+  hidden?: boolean;
+  updated: string;
 }
 
 export interface FakeCall {
@@ -57,6 +72,7 @@ export interface FakeCall {
 /** Replaces fetch with a fake Google: sign-in, token refresh and the Tasks list endpoints. */
 export function fakeGoogle(opts: FakeGoogleOptions = {}) {
   const lists = [...(opts.lists ?? [])];
+  const tasks: Record<string, FakeTask[]> = structuredClone(opts.tasks ?? {});
   const calls: FakeCall[] = [];
 
   const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -93,6 +109,22 @@ export function fakeGoogle(opts: FakeGoogleOptions = {}) {
         lists.push(list);
         return Response.json(list);
       }
+      const inList = /^\/tasks\/v1\/lists\/([^/]+)\/tasks$/.exec(url.pathname);
+      if (inList) {
+        const items = (tasks[decodeURIComponent(inList[1]!)] ??= []);
+        if (request.method === "GET") return Response.json({ items });
+        if (request.method === "POST") {
+          const input = JSON.parse(body) as Partial<FakeTask>;
+          const task: FakeTask = {
+            id: `task-${items.length + 1}`,
+            status: "needsAction",
+            updated: new Date().toISOString(),
+            ...input,
+          };
+          items.push(task);
+          return Response.json(task);
+        }
+      }
       const one = url.pathname.startsWith(`${LISTS_PATH}/`) ? decodeURIComponent(url.pathname.slice(LISTS_PATH.length + 1)) : null;
       if (one && request.method === "GET") {
         const list = lists.find((l) => l.id === one);
@@ -104,19 +136,33 @@ export function fakeGoogle(opts: FakeGoogleOptions = {}) {
   });
 
   vi.stubGlobal("fetch", mock);
-  return { mock, calls, lists };
+  return { mock, calls, lists, tasks };
 }
 
 export async function insertUser(
-  opts: { email?: string; sub?: string; refreshToken?: string | null; tasklistId?: string | null } = {},
+  opts: {
+    email?: string;
+    sub?: string;
+    refreshToken?: string | null;
+    tasklistId?: string | null;
+    lastSyncedAt?: string | null;
+  } = {},
 ): Promise<number> {
   const sub = opts.sub ?? "google-sub-alex";
   const tokenEnc = opts.refreshToken ? await encryptToken(env.TOKEN_ENC_KEY, opts.refreshToken, sub) : null;
   const row = await env.DB.prepare(
-    `INSERT INTO users (email, display_name, google_sub, refresh_token_enc, tasklist_id, created_at)
-     VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
+    `INSERT INTO users (email, display_name, google_sub, refresh_token_enc, tasklist_id, last_synced_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`,
   )
-    .bind(opts.email ?? ALLOWED, "Alex Example", sub, tokenEnc, opts.tasklistId ?? null, new Date().toISOString())
+    .bind(
+      opts.email ?? ALLOWED,
+      "Alex Example",
+      sub,
+      tokenEnc,
+      opts.tasklistId ?? null,
+      opts.lastSyncedAt ?? null,
+      new Date().toISOString(),
+    )
     .first<{ id: number }>();
   return row!.id;
 }
@@ -126,5 +172,5 @@ export async function sessionCookie(userId: number, expiresAt = Math.floor(Date.
 }
 
 export async function resetDatabase() {
-  await env.DB.exec("DELETE FROM users; DELETE FROM job_runs;");
+  await env.DB.exec("DELETE FROM sync_log; DELETE FROM users; DELETE FROM job_runs;");
 }
