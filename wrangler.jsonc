@@ -8,9 +8,7 @@
     {
       "binding": "DB",
       "database_name": "duties-db",
-      // Placeholder for local dev and tests. Replace with the id printed by
-      // `wrangler d1 create duties-db` before the first deploy.
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "590e8a3c-563f-4614-aebf-501a0e39f8d0",
       "migrations_dir": "migrations"
     }
   ]
