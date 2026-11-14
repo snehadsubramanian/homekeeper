@@ -1,12 +1,18 @@
 import app from "./app";
 import type { AppEnv } from "./env";
-import { runTokenRefresh } from "./jobs";
+import { CRON_DAILY, CRON_SYNC, runSync, runTokenRefresh } from "./jobs";
 
 export default {
   fetch: app.fetch,
 
-  // Daily cron (see wrangler.jsonc). For now it only checks Google access.
-  async scheduled(_controller, env, ctx) {
-    ctx.waitUntil(runTokenRefresh(env));
+  // Cron triggers are listed in wrangler.jsonc.
+  async scheduled(controller, env, ctx) {
+    if (controller.cron === CRON_SYNC) {
+      ctx.waitUntil(runSync(env, new Date(controller.scheduledTime)));
+    } else if (controller.cron === CRON_DAILY) {
+      ctx.waitUntil(runTokenRefresh(env));
+    } else {
+      console.warn("unknown cron trigger:", controller.cron);
+    }
   },
 } satisfies ExportedHandler<AppEnv>;
