@@ -1,8 +1,9 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
+import { encryptToken } from "./crypto";
 import type { AppEnv } from "./env";
-import { authorizationUrl, exchangeCode, GoogleSignInError } from "./google";
+import { authorizationUrl, exchangeCode, GoogleApiError, GoogleSignInError, TASKS_SCOPE } from "./google";
 import { MessagePage } from "./pages";
 import {
   randomToken,
@@ -13,11 +14,13 @@ import {
   verifyCsrf,
   verifySession,
 } from "./session";
+import { ensureTaskList } from "./tasks";
 
 export interface User {
   id: number;
   email: string;
   display_name: string | null;
+  tasklist_id: string | null;
 }
 
 export type AppContext = { Bindings: AppEnv; Variables: { user: User } };
@@ -36,7 +39,7 @@ export async function currentUser(c: Context<AppContext>): Promise<User | null> 
   if (!cookie) return null;
   const userId = await verifySession(c.env.SESSION_KEY, cookie);
   if (userId === null) return null;
-  const user = await c.env.DB.prepare("SELECT id, email, display_name FROM users WHERE id = ?")
+  const user = await c.env.DB.prepare("SELECT id, email, display_name, tasklist_id FROM users WHERE id = ?")
     .bind(userId)
     .first<User>();
   if (!user || !isAllowed(c.env, user.email)) return null;
@@ -71,14 +74,15 @@ auth.get("/callback", async (c) => {
     return c.html(<MessagePage title="Sign-in failed" message="That sign-in link expired. Please try again." />, 400);
   }
 
-  let identity;
+  let signIn;
   try {
-    identity = await exchangeCode(c.env, code, verifier);
+    signIn = await exchangeCode(c.env, code, verifier);
   } catch (err) {
     if (!(err instanceof GoogleSignInError)) throw err;
     console.warn("sign-in rejected:", err.message);
     return c.html(<MessagePage title="Sign-in failed" message="Google sign-in didn't complete. Please try again." />, 400);
   }
+  const { identity } = signIn;
 
   if (!identity.emailVerified || !isAllowed(c.env, identity.email)) {
     return c.html(
@@ -87,12 +91,44 @@ auth.get("/callback", async (c) => {
     );
   }
 
+  // Google lets people untick individual permissions; the app is useless without Tasks.
+  if (!signIn.grantedScopes.has(TASKS_SCOPE)) {
+    return c.html(
+      <MessagePage
+        title="Tasks access needed"
+        message="homekeeper needs permission to manage its own Google Tasks list. Please sign in again and allow access to Google Tasks."
+      />,
+      403,
+    );
+  }
+
+  let tasklistId: string;
+  try {
+    tasklistId = await ensureTaskList(signIn.accessToken, c.env.TASKLIST_NAME);
+  } catch (err) {
+    if (!(err instanceof GoogleApiError)) throw err;
+    console.warn("task list setup failed:", err.message);
+    return c.html(
+      <MessagePage title="Sign-in failed" message="Couldn't reach Google Tasks. Please try again in a minute." />,
+      502,
+    );
+  }
+
+  const tokenEnc = signIn.refreshToken
+    ? await encryptToken(c.env.TOKEN_ENC_KEY, signIn.refreshToken, identity.sub)
+    : null;
+
   const user = await c.env.DB.prepare(
-    `INSERT INTO users (email, display_name, google_sub, created_at) VALUES (?, ?, ?, ?)
-     ON CONFLICT (google_sub) DO UPDATE SET email = excluded.email, display_name = excluded.display_name
+    `INSERT INTO users (email, display_name, google_sub, refresh_token_enc, tasklist_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT (google_sub) DO UPDATE SET
+       email = excluded.email,
+       display_name = excluded.display_name,
+       refresh_token_enc = COALESCE(excluded.refresh_token_enc, users.refresh_token_enc),
+       tasklist_id = excluded.tasklist_id
      RETURNING id`,
   )
-    .bind(identity.email, identity.name, identity.sub, new Date().toISOString())
+    .bind(identity.email, identity.name, identity.sub, tokenEnc, tasklistId, new Date().toISOString())
     .first<{ id: number }>();
   if (!user) throw new Error("user upsert returned no row");
 

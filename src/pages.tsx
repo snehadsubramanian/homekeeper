@@ -89,12 +89,25 @@ export function PrivacyPage() {
   );
 }
 
-export function HomePage({ name, email, csrf }: { name: string | null; email: string; csrf: string }) {
+export function HomePage({
+  name,
+  email,
+  csrf,
+  statusLines,
+}: {
+  name: string | null;
+  email: string;
+  csrf: string;
+  statusLines: string[];
+}) {
   return (
     <Layout title="homekeeper">
       <p>
         Signed in as {name ? `${name} (${email})` : email}.
       </p>
+      {statusLines.map((line) => (
+        <p>{line}</p>
+      ))}
       <form method="post" action="/auth/logout">
         <input type="hidden" name="_csrf" value={csrf} />
         <button type="submit">Sign out</button>
