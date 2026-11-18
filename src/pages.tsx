@@ -110,7 +110,7 @@ export function HomePage({
   email: string;
   csrf: string;
   statusLines: string[];
-  spike: { lastSync: string; rows: SyncLogRow[] };
+  spike: { justCreated: boolean; lastSync: string; rows: SyncLogRow[] };
 }) {
   return (
     <Layout title="homekeeper">
@@ -123,6 +123,12 @@ export function HomePage({
 
       <section>
         <h2>Round-trip test (temporary)</h2>
+        {spike.justCreated && (
+          <p>
+            <strong>Test task created for today.</strong> It shows in Google Calendar now, and in the log below after
+            the next sync (every 5 minutes).
+          </p>
+        )}
         <form method="post" action="/spike/test-task">
           <input type="hidden" name="_csrf" value={csrf} />
           <button type="submit">Create test task</button>

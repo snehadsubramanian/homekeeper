@@ -48,5 +48,5 @@ spike.post("/test-task", async (c) => {
     );
   }
 
-  return c.redirect("/");
+  return c.redirect("/?created=1");
 });

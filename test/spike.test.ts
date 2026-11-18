@@ -31,7 +31,7 @@ describe("POST /spike/test-task (temporary, Step 3)", () => {
     const res = await post(cookie, csrf);
 
     expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBe("/");
+    expect(res.headers.get("location")).toBe("/?created=1");
     const created = google.calls.filter((c) => c.method === "POST" && c.url.pathname === `/tasks/v1/lists/${LIST}/tasks`);
     expect(created).toHaveLength(1);
     expect(created[0]!.authorization).toBe("Bearer access-for-rt-alex");
@@ -88,6 +88,17 @@ describe("home page spike section (temporary, Step 3)", () => {
     expect(html).toMatch(/<form[^>]*method="post"[^>]*action="\/spike\/test-task"/);
     expect(html).toContain("Last sync: never");
     expect(html).toContain("Sync has not seen any changes yet.");
+  });
+
+  it("confirms a test task was created and says when it will appear", async () => {
+    const cookie = await sessionCookie(await insertUser({ refreshToken: "rt-alex", tasklistId: LIST }));
+
+    const after = await (await app.request("/?created=1", { headers: { cookie } }, env)).text();
+    const normal = await (await app.request("/", { headers: { cookie } }, env)).text();
+
+    expect(after).toContain("Test task created");
+    expect(after).toContain("next sync");
+    expect(normal).not.toContain("Test task created");
   });
 
   it("shows the last sync time and the user's latest log entries, newest first, in household time", async () => {

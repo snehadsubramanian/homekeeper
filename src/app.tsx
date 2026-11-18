@@ -74,6 +74,7 @@ app.get("/", async (c) => {
       csrf={csrf}
       statusLines={[taskListLine, checkLine]}
       spike={{
+        justCreated: c.req.query("created") === "1",
         lastSync: synced?.last_synced_at ? householdDateTime(tz, new Date(synced.last_synced_at)) : "never",
         rows,
       }}
