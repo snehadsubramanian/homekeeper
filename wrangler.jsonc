@@ -12,8 +12,9 @@
     "TASKLIST_NAME": "Household duties (dev)"
   },
   "triggers": {
-    // 09:00 UTC daily (5 a.m. EDT / 4 a.m. EST)
-    "crons": ["0 9 * * *"]
+    // 09:00 UTC daily (5 a.m. EDT / 4 a.m. EST), and sync every 5 minutes.
+    // Keep in step with CRON_DAILY and CRON_SYNC in src/jobs.ts.
+    "crons": ["0 9 * * *", "*/5 * * * *"]
   },
   "d1_databases": [
     {

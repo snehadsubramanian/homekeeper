@@ -11,6 +11,7 @@ const TEST_VARS = {
   // base64 of the 32 ASCII bytes "test-token-enc-key-not-a-secret!"
   TOKEN_ENC_KEY: "dGVzdC10b2tlbi1lbmMta2V5LW5vdC1hLXNlY3JldCE=",
   TASKLIST_NAME: "Household duties (test)",
+  HOUSEHOLD_TZ: "America/Chicago",
 };
 
 export default defineConfig(async () => {

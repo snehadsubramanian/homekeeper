@@ -42,6 +42,13 @@ export async function currentUser(c: Context<AppContext>): Promise<User | null> 
   return user;
 }
 
+/** Checks the per-session CSRF token that every state-changing form carries as `_csrf`. */
+export async function formCsrfOk(c: Context<AppContext>, userId: number): Promise<boolean> {
+  const form = await c.req.parseBody();
+  const token = typeof form._csrf === "string" ? form._csrf : "";
+  return verifyCsrf(c.env.SESSION_KEY, userId, token);
+}
+
 /** Sends signed-out visitors to the sign-in page. */
 export const requireUser: MiddlewareHandler<AppContext> = async (c, next) => {
   const user = await currentUser(c);
@@ -139,12 +146,8 @@ auth.get("/callback", async (c) => {
 
 auth.post("/logout", async (c) => {
   const user = await currentUser(c);
-  if (user) {
-    const form = await c.req.parseBody();
-    const token = typeof form._csrf === "string" ? form._csrf : "";
-    if (!(await verifyCsrf(c.env.SESSION_KEY, user.id, token))) {
-      return c.html(<MessagePage title="Not allowed" message="That request could not be verified." />, 403);
-    }
+  if (user && !(await formCsrfOk(c, user.id))) {
+    return c.html(<MessagePage title="Not allowed" message="That request could not be verified." />, 403);
   }
   deleteCookie(c, SESSION_COOKIE, { ...COOKIE_BASE, path: "/" });
   return c.redirect("/signin");

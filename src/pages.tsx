@@ -89,16 +89,28 @@ export function PrivacyPage() {
   );
 }
 
+/** One line of the temporary Step 3 sync log, already formatted for display. */
+export interface SyncLogRow {
+  seen: string;
+  title: string;
+  status: string;
+  due: string;
+  completed: string;
+  flags: string;
+}
+
 export function HomePage({
   name,
   email,
   csrf,
   statusLines,
+  spike,
 }: {
   name: string | null;
   email: string;
   csrf: string;
   statusLines: string[];
+  spike: { justCreated: boolean; lastSync: string; rows: SyncLogRow[] };
 }) {
   return (
     <Layout title="homekeeper">
@@ -108,6 +120,50 @@ export function HomePage({
       {statusLines.map((line) => (
         <p>{line}</p>
       ))}
+
+      <section>
+        <h2>Round-trip test (temporary)</h2>
+        {spike.justCreated && (
+          <p>
+            <strong>Test task created for today.</strong> It shows in Google Calendar now, and in the log below after
+            the next sync (every 5 minutes).
+          </p>
+        )}
+        <form method="post" action="/spike/test-task">
+          <input type="hidden" name="_csrf" value={csrf} />
+          <button type="submit">Create test task</button>
+        </form>
+        <p>Last sync: {spike.lastSync}</p>
+        {spike.rows.length === 0 ? (
+          <p>Sync has not seen any changes yet.</p>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>Seen</th>
+                <th>Task</th>
+                <th>Status</th>
+                <th>Due</th>
+                <th>Completed</th>
+                <th>Flags</th>
+              </tr>
+            </thead>
+            <tbody>
+              {spike.rows.map((r) => (
+                <tr>
+                  <td>{r.seen}</td>
+                  <td>{r.title}</td>
+                  <td>{r.status}</td>
+                  <td>{r.due}</td>
+                  <td>{r.completed}</td>
+                  <td>{r.flags}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
       <form method="post" action="/auth/logout">
         <input type="hidden" name="_csrf" value={csrf} />
         <button type="submit">Sign out</button>

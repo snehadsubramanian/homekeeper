@@ -17,6 +17,8 @@ export interface AppVars {
   TOKEN_ENC_KEY: string;
   /** Name of the Google Tasks list the app owns. Set in wrangler.jsonc. */
   TASKLIST_NAME: string;
+  /** IANA time zone for the household's dates, e.g. Europe/London. A dashboard variable. */
+  HOUSEHOLD_TZ: string;
 }
 
 export type AppEnv = Env & AppVars;
