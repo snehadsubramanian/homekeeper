@@ -12,6 +12,7 @@
     "types": "wrangler types"
   },
   "dependencies": {
+    "date-fns": "^4.4.0",
     "hono": "^4.13.17"
   },
   "devDependencies": {
