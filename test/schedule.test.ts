@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  type Cadence,
   type ScheduleDuty,
   defaultLandingDay,
   firstDueDate,
@@ -20,15 +19,6 @@ const plantsMonthlyAfter: ScheduleDuty = { cadence: "monthly", anchorMode: "afte
 const plantsMonthlyFixed: ScheduleDuty = { cadence: "monthly", anchorMode: "fixed" };
 const chimneyYearlyAfter: ScheduleDuty = { cadence: "yearly", anchorMode: "after_completion" };
 const chimneyYearlyFixed: ScheduleDuty = { cadence: "yearly", anchorMode: "fixed", cadenceMonths: [3] };
-
-const CADENCES: Cadence[] = ["weekly", "monthly", "quarterly", "semiannual", "yearly"];
-const MONTHS_FOR: Record<Cadence, number[] | undefined> = {
-  weekly: undefined,
-  monthly: undefined,
-  quarterly: [1, 4, 7, 10],
-  semiannual: [4, 10],
-  yearly: [6],
-};
 
 describe("defaultLandingDay", () => {
   it("weekly: the first Saturday on or after the reference date", () => {
@@ -193,23 +183,57 @@ describe("nextDueAfterSkip", () => {
 describe("firstDueDate", () => {
   const today = "2026-11-21";
 
-  it("unknown last-done date: due today, for every cadence and both anchor modes", () => {
-    for (const cadence of CADENCES) {
-      for (const anchorMode of ["fixed", "after_completion"] as const) {
-        const duty: ScheduleDuty = {
-          cadence,
-          anchorMode,
-          cadenceMonths: anchorMode === "fixed" ? MONTHS_FOR[cadence] : undefined,
-          lastDoneDate: null,
-          lastDonePrecision: "unknown",
-        };
-        expect(firstDueDate(duty, today), `${cadence} ${anchorMode}`).toBe(today);
-      }
-    }
-  });
+  describe("unknown last-done date", () => {
+    const unknown = (duty: ScheduleDuty): ScheduleDuty => ({
+      ...duty,
+      lastDoneDate: null,
+      lastDonePrecision: "unknown",
+    });
 
-  it("no precision given counts as unknown", () => {
-    expect(firstDueDate(binsWeeklyAfter, today)).toBe(today);
+    it("weekly, either anchor mode: the next Saturday on or after today", () => {
+      for (const duty of [binsWeeklyAfter, binsWeeklyFixed]) {
+        expect(firstDueDate(unknown(duty), "2026-11-18"), duty.anchorMode).toBe("2026-11-21"); // Wed
+        expect(firstDueDate(unknown(duty), "2026-11-21"), duty.anchorMode).toBe("2026-11-21"); // Sat
+        expect(firstDueDate(unknown(duty), "2026-11-22"), duty.anchorMode).toBe("2026-11-28"); // Sun
+      }
+    });
+
+    it("fixed April/October, today between the slots: first Saturday of April", () => {
+      expect(firstDueDate(unknown(acFilterFixed), "2026-11-21")).toBe("2027-04-03");
+    });
+
+    it("fixed April/October, today in October: this October if its first Saturday is ahead", () => {
+      expect(firstDueDate(unknown(acFilterFixed), "2026-10-01")).toBe("2026-10-03");
+      expect(firstDueDate(unknown(acFilterFixed), "2026-10-03")).toBe("2026-10-03");
+      expect(firstDueDate(unknown(acFilterFixed), "2026-10-05")).toBe("2027-04-03");
+    });
+
+    it("fixed monthly: this month's first Saturday if still ahead, else next month's", () => {
+      expect(firstDueDate(unknown(plantsMonthlyFixed), "2026-11-02")).toBe("2026-11-07");
+      expect(firstDueDate(unknown(plantsMonthlyFixed), "2026-11-07")).toBe("2026-11-07");
+      expect(firstDueDate(unknown(plantsMonthlyFixed), "2026-11-21")).toBe("2026-12-05");
+    });
+
+    it("fixed quarterly and yearly: the first Saturday of the next named month", () => {
+      expect(firstDueDate(unknown(gutterQuarterlyFixed), "2026-11-21")).toBe("2027-02-06");
+      expect(firstDueDate(unknown(chimneyYearlyFixed), "2026-11-21")).toBe("2027-03-06");
+    });
+
+    it("after completion, month-based cadences: due today (nothing to count from)", () => {
+      for (const duty of [gutterQuarterlyAfter, plantsMonthlyAfter, acFilterAfter, chimneyYearlyAfter]) {
+        expect(firstDueDate(unknown(duty), today), duty.cadence).toBe(today);
+      }
+    });
+
+    it("refuses a fixed duty with invalid named months", () => {
+      const none: ScheduleDuty = { cadence: "quarterly", anchorMode: "fixed" };
+      expect(() => firstDueDate(unknown(none), today)).toThrow(/months/);
+    });
+
+    it("no precision given counts as unknown", () => {
+      expect(firstDueDate(binsWeeklyAfter, "2026-11-18")).toBe("2026-11-21");
+      expect(firstDueDate(plantsMonthlyAfter, today)).toBe(today);
+    });
   });
 
   it("day precision, after completion: last done plus the interval", () => {
