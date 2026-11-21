@@ -172,7 +172,9 @@ export function nextDueAfterSkip(duty: ScheduleDuty, skippedSlotDate: string): s
 /**
  * Due date of the first occurrence, when a duty is created or resumed.
  *
- * - Unknown last-done date: due today.
+ * - Unknown last-done date: weekly → the next Saturday on or after today;
+ *   fixed → the first Saturday of the next named month on or after today;
+ *   after completion → today, since there is nothing to count from.
  * - Day precision: as if completed on that day (`nextDueDate`).
  * - Month precision: counted from that month; year precision: from January
  *   of that year. Either lands on the default landing day.
@@ -181,7 +183,7 @@ export function nextDueAfterSkip(duty: ScheduleDuty, skippedSlotDate: string): s
 export function firstDueDate(duty: ScheduleDuty, today: string): string {
   parseDate(today);
   const precision = duty.lastDonePrecision ?? "unknown";
-  if (precision === "unknown") return today;
+  if (precision === "unknown") return firstDueWithoutHistory(duty, today);
 
   const lastDone = duty.lastDoneDate;
   if (!lastDone) throw new Error(`The last-done date is missing for ${precision} precision`);
@@ -202,6 +204,17 @@ export function firstDueDate(duty: ScheduleDuty, today: string): string {
     }
   }
   return rolledDueDate(due, today);
+}
+
+/** First due date for a duty with no known last-done date. */
+function firstDueWithoutHistory(duty: ScheduleDuty, today: string): string {
+  if (duty.cadence === "weekly") return defaultLandingDay("weekly", today);
+  if (duty.anchorMode === "after_completion") return today;
+  const months = namedMonths(duty.cadence, duty.cadenceMonths);
+  const thisMonth = monthIndexOf(parseDate(today));
+  const thisMonthsDay = defaultLandingDay(duty.cadence, today);
+  if (months.includes((thisMonth % 12) + 1) && thisMonthsDay >= today) return thisMonthsDay;
+  return defaultLandingDay(duty.cadence, toDateString(dateInMonth(firstNamedMonthAfter(thisMonth, months), 1)));
 }
 
 /**
