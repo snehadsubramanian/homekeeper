@@ -271,6 +271,10 @@ describe("firstDueDate", () => {
     expect(firstDueDate({ ...chimneyYearlyAfter, lastDoneDate: "2026", lastDonePrecision: "year" }, today)).toBe(
       "2027-01-02",
     );
+    // a full date at year precision still counts from January
+    expect(
+      firstDueDate({ ...chimneyYearlyAfter, lastDoneDate: "2026-07-15", lastDonePrecision: "year" }, today),
+    ).toBe("2027-01-02");
     // fixed: the first named month after January
     expect(
       firstDueDate({ ...acFilterFixed, lastDoneDate: "2026", lastDonePrecision: "year" }, "2026-02-01"),
@@ -286,6 +290,12 @@ describe("firstDueDate", () => {
     ).toThrow(/date/);
     expect(() =>
       firstDueDate({ ...plantsMonthlyAfter, lastDoneDate: "20xx", lastDonePrecision: "year" }, today),
+    ).toThrow(/date/);
+    expect(() =>
+      firstDueDate({ ...plantsMonthlyAfter, lastDoneDate: "2026", lastDonePrecision: "month" }, today),
+    ).toThrow(/date/);
+    expect(() =>
+      firstDueDate({ ...plantsMonthlyAfter, lastDoneDate: "2026-13", lastDonePrecision: "month" }, today),
     ).toThrow(/date/);
   });
 
