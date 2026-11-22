@@ -3,11 +3,13 @@
  * re-run, and runs are logged in job_runs.
  */
 import { isAllowed } from "./allowlist";
+import { pushPendingTasks } from "./assignments";
 import { decryptToken } from "./crypto";
 import type { AppEnv } from "./env";
 import { GoogleApiError, refreshAccessToken } from "./google";
-import { getTaskList, listChangedTasks } from "./tasks";
-import { dateFromGoogleDue, householdDate } from "./time";
+import { type AnchorMode, type Cadence, nextDueDate, rolledDueDate } from "./schedule";
+import { type GoogleTask, getTaskList, listChangedTasks } from "./tasks";
+import { householdDate } from "./time";
 
 /** Must match the "crons" in wrangler.jsonc. */
 export const CRON_DAILY = "0 9 * * *";
@@ -81,13 +83,15 @@ export async function runTokenRefresh(env: AppEnv): Promise<void> {
 }
 
 /**
- * Every five minutes: read what changed in each user's task list since the
- * last sync and record it. In Step 3 this only logs to sync_log (temporary);
- * Step 5 turns check-offs into completions.
+ * Every five minutes, for each person: read what changed in their task list
+ * since the last sync, turn each check-off into a completion and schedule the
+ * next occurrence, then create any Google tasks still missing. Each person's
+ * completions are written in one batch, so a run never half-records one.
+ * Deletes, date moves and un-checks are Step 11; for now they change nothing.
  */
 export async function runSync(env: AppEnv, now: Date = new Date()): Promise<void> {
   const problems: string[] = [];
-  let newEntries = 0;
+  let activity = 0;
 
   try {
     for (const user of await activeUsers(env)) {
@@ -96,32 +100,18 @@ export async function runSync(env: AppEnv, now: Date = new Date()): Promise<void
         const since = user.last_synced_at ? new Date(Date.parse(user.last_synced_at) - SYNC_OVERLAP_MS) : null;
         const tasks = await listChangedTasks(accessToken, user.tasklist_id, since);
 
-        for (const task of tasks) {
-          const completedDate = task.completed ? householdDate(env.HOUSEHOLD_TZ, new Date(task.completed)) : null;
-          const result = await env.DB.prepare(
-            `INSERT OR IGNORE INTO sync_log
-               (seen_at, user_id, google_task_id, title, status, due_date, completed_date, completed_at, deleted, hidden, google_updated)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          )
-            .bind(
-              now.toISOString(),
-              user.id,
-              task.id,
-              task.title ?? null,
-              task.status ?? null,
-              task.due ? dateFromGoogleDue(task.due) : null,
-              completedDate,
-              task.completed ?? null,
-              task.deleted ? 1 : 0,
-              task.hidden ? 1 : 0,
-              task.updated,
-            )
-            .run();
-          newEntries += result.meta.changes ?? 0;
-        }
-
+        const { statements, completions, skipped } = await completionWrites(env, user.id, tasks, now);
+        problems.push(...skipped.map((p) => `user ${user.id}: ${p}`));
         // The run's start time, not its end: with the overlap, nothing in between is missed.
-        await env.DB.prepare("UPDATE users SET last_synced_at = ? WHERE id = ?").bind(now.toISOString(), user.id).run();
+        statements.push(
+          env.DB.prepare("UPDATE users SET last_synced_at = ? WHERE id = ?").bind(now.toISOString(), user.id),
+        );
+        await env.DB.batch(statements);
+        activity += completions;
+
+        const pushed = await pushPendingTasks(env, user, accessToken);
+        problems.push(...pushed.problems.map((p) => `user ${user.id}: ${p}`));
+        activity += pushed.created;
       } catch (err) {
         problems.push(`user ${user.id}: ${describe(err)}`);
       }
@@ -130,14 +120,106 @@ export async function runSync(env: AppEnv, now: Date = new Date()): Promise<void
     problems.push(`job: ${describe(err)}`);
   }
 
-  await recordSyncRun(env, now, problems, newEntries);
+  await recordSyncRun(env, now, problems, activity);
+}
+
+interface OpenAssignment {
+  assignment_id: number;
+  google_task_id: string;
+  occurrence_id: number;
+  slot_date: string;
+  duty_id: number;
+  cadence: Cadence;
+  cadence_months: string | null;
+  anchor_mode: AnchorMode;
+}
+
+/**
+ * The writes that record each newly checked-off task: its assignment and
+ * occurrence done on the household date, the duty's last-done date, and the
+ * next occurrence with an assignment waiting for its Google task. A duty that
+ * can't be scheduled is skipped and reported, and the rest go ahead.
+ *
+ * Only open assignments are considered, so a check-off seen again in the next
+ * sync's overlap does nothing. If two runs ever raced, the one-open-occurrence
+ * index would make the second batch fail as a whole.
+ */
+async function completionWrites(
+  env: AppEnv,
+  userId: number,
+  tasks: GoogleTask[],
+  now: Date,
+): Promise<{ statements: D1PreparedStatement[]; completions: number; skipped: string[] }> {
+  const statements: D1PreparedStatement[] = [];
+  const skipped: string[] = [];
+  const ticked = tasks.filter((t) => t.status === "completed" && t.completed && !t.deleted);
+  if (ticked.length === 0) return { statements, completions: 0, skipped };
+
+  const { results } = await env.DB.prepare(
+    `SELECT a.id AS assignment_id, a.google_task_id, o.id AS occurrence_id, o.slot_date,
+            d.id AS duty_id, d.cadence, d.cadence_months, d.anchor_mode
+     FROM assignments a
+     JOIN occurrences o ON o.id = a.occurrence_id
+     JOIN duties d ON d.id = o.duty_id
+     WHERE a.user_id = ? AND a.status = 'open' AND o.status = 'open' AND a.google_task_id IS NOT NULL`,
+  )
+    .bind(userId)
+    .all<OpenAssignment>();
+  const byTask = new Map(results.map((r) => [r.google_task_id, r]));
+  const today = householdDate(env.HOUSEHOLD_TZ, now);
+
+  let completions = 0;
+  for (const task of ticked) {
+    const open = byTask.get(task.id);
+    if (!open) continue; // Already recorded, or not one of the app's tasks.
+    try {
+      const doneDate = householdDate(env.HOUSEHOLD_TZ, new Date(task.completed!));
+      const next = nextDueDate(
+        {
+          cadence: open.cadence,
+          anchorMode: open.anchor_mode,
+          cadenceMonths: open.cadence_months ? (JSON.parse(open.cadence_months) as number[]) : null,
+        },
+        doneDate,
+        open.slot_date,
+      );
+      statements.push(
+        env.DB.prepare("UPDATE assignments SET status = 'done', completed_date = ? WHERE id = ? AND status = 'open'").bind(
+          doneDate,
+          open.assignment_id,
+        ),
+        env.DB.prepare("UPDATE occurrences SET status = 'done', completed_date = ? WHERE id = ? AND status = 'open'").bind(
+          doneDate,
+          open.occurrence_id,
+        ),
+        env.DB.prepare("UPDATE duties SET last_done_date = ?, last_done_precision = 'day' WHERE id = ?").bind(
+          doneDate,
+          open.duty_id,
+        ),
+        env.DB.prepare("INSERT INTO occurrences (duty_id, slot_date, due_date, status) VALUES (?, ?, ?, 'open')").bind(
+          open.duty_id,
+          next,
+          rolledDueDate(next, today),
+        ),
+        env.DB.prepare(
+          `INSERT INTO assignments (occurrence_id, user_id, status)
+           VALUES ((SELECT id FROM occurrences WHERE duty_id = ? AND status = 'open'), ?, 'open')`,
+        ).bind(open.duty_id, userId),
+      );
+      completions++;
+    } catch (err) {
+      skipped.push(`duty ${open.duty_id} skipped: ${describe(err)}`);
+    }
+  }
+  return { statements, completions, skipped };
 }
 
 /**
  * Sync runs 288 times a day, so job_runs gets every failed run but at most
- * one successful run per hour, and only for hours where sync saw a change.
+ * one successful run per hour, and only for hours where sync recorded a
+ * completion or created a task.
  */
-async function recordSyncRun(env: AppEnv, now: Date, problems: string[], newEntries: number): Promise<void> {
+async function recordSyncRun(env: AppEnv, now: Date, problems: string[], activity: number): Promise<void> {
   const startedAt = now.toISOString();
   const insert = (ok: number, error: string | null) =>
     env.DB.prepare("INSERT INTO job_runs (job, started_at, finished_at, ok, error) VALUES ('sync', ?, ?, ?, ?)")
@@ -149,7 +231,7 @@ async function recordSyncRun(env: AppEnv, now: Date, problems: string[], newEntr
     await insert(0, problems.join("; "));
     return;
   }
-  if (newEntries === 0) return;
+  if (activity === 0) return;
 
   const sameHour = await env.DB.prepare(
     "SELECT 1 FROM job_runs WHERE job = 'sync' AND ok = 1 AND substr(started_at, 1, 13) = ?",
