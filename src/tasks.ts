@@ -90,3 +90,16 @@ export function createTask(
 ): Promise<GoogleTask> {
   return call<GoogleTask>(accessToken, tasksUrl(listId).toString(), { method: "POST", body: JSON.stringify(task) });
 }
+
+/** Changes only the given fields of one task, e.g. its due date. */
+export function patchTask(
+  accessToken: string,
+  listId: string,
+  taskId: string,
+  fields: { due: string },
+): Promise<GoogleTask> {
+  return call<GoogleTask>(accessToken, `${tasksUrl(listId)}/${encodeURIComponent(taskId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(fields),
+  });
+}
