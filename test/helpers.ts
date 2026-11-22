@@ -47,6 +47,8 @@ export interface FakeGoogleOptions {
   refreshErrors?: Record<string, string>;
   /** Tasks in each list, keyed by list id. */
   tasks?: Record<string, FakeTask[]>;
+  /** Task ids whose updates fail, mapped to the HTTP status. Returned, so a test can clear it. */
+  patchErrors?: Record<string, number>;
 }
 
 /** A task as the Google Tasks API returns it. */
@@ -74,6 +76,7 @@ export function fakeGoogle(opts: FakeGoogleOptions = {}) {
   const lists = [...(opts.lists ?? [])];
   const tasks: Record<string, FakeTask[]> = structuredClone(opts.tasks ?? {});
   const calls: FakeCall[] = [];
+  const patchErrors: Record<string, number> = { ...(opts.patchErrors ?? {}) };
 
   const mock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = new Request(input, init);
@@ -125,6 +128,16 @@ export function fakeGoogle(opts: FakeGoogleOptions = {}) {
           return Response.json(task);
         }
       }
+      const oneTask = /^\/tasks\/v1\/lists\/([^/]+)\/tasks\/([^/]+)$/.exec(url.pathname);
+      if (oneTask && request.method === "PATCH") {
+        const taskId = decodeURIComponent(oneTask[2]!);
+        const status = patchErrors[taskId];
+        if (status) return Response.json({ error: { code: status } }, { status });
+        const existing = tasks[decodeURIComponent(oneTask[1]!)]?.find((t) => t.id === taskId);
+        if (!existing) return Response.json({ error: { code: 404 } }, { status: 404 });
+        Object.assign(existing, JSON.parse(body) as Partial<FakeTask>, { updated: new Date().toISOString() });
+        return Response.json(existing);
+      }
       const one = url.pathname.startsWith(`${LISTS_PATH}/`) ? decodeURIComponent(url.pathname.slice(LISTS_PATH.length + 1)) : null;
       if (one && request.method === "GET") {
         const list = lists.find((l) => l.id === one);
@@ -136,7 +149,7 @@ export function fakeGoogle(opts: FakeGoogleOptions = {}) {
   });
 
   vi.stubGlobal("fetch", mock);
-  return { mock, calls, lists, tasks };
+  return { mock, calls, lists, tasks, patchErrors };
 }
 
 export async function insertUser(
