@@ -8,8 +8,8 @@ import { decryptToken } from "./crypto";
 import type { AppEnv } from "./env";
 import { GoogleApiError, refreshAccessToken } from "./google";
 import { type AnchorMode, type Cadence, nextDueDate, rolledDueDate } from "./schedule";
-import { type GoogleTask, getTaskList, listChangedTasks } from "./tasks";
-import { householdDate } from "./time";
+import { type GoogleTask, getTaskList, listChangedTasks, patchTask } from "./tasks";
+import { householdDate, toGoogleDue } from "./time";
 
 /** Must match the "crons" in wrangler.jsonc. */
 export const CRON_DAILY = "0 9 * * *";
@@ -239,4 +239,83 @@ async function recordSyncRun(env: AppEnv, now: Date, problems: string[], activit
     .bind(startedAt.slice(0, 13))
     .first();
   if (!sameHour) await insert(1, null);
+}
+
+
+/** The daily cron run: the token check, then the roll-forward. Each logs its own job_runs row. */
+export async function runDaily(env: AppEnv, now: Date = new Date()): Promise<void> {
+  await runTokenRefresh(env);
+  await runRollForward(env, now);
+}
+
+interface OverdueAssignment {
+  assignment_id: number;
+  google_task_id: string | null;
+  occurrence_id: number;
+  due_date: string;
+}
+
+/**
+ * Each morning, every open occurrence whose due date has passed moves to
+ * today (the household date), in Google first and then in the database.
+ * slot_date keeps the original due date. Nothing is ever created, so a duty
+ * keeps its one task.
+ *
+ * A task Google can't update keeps its old date in the database, so the next
+ * run (even the same day) tries again. A row that can't be rolled is skipped
+ * and reported while the others go ahead. A re-run finds nothing overdue.
+ * All of a run's date changes are written in one batch at the end.
+ */
+export async function runRollForward(env: AppEnv, now: Date = new Date()): Promise<void> {
+  const run = await env.DB.prepare("INSERT INTO job_runs (job, started_at) VALUES ('roll_forward', ?) RETURNING id")
+    .bind(new Date().toISOString())
+    .first<{ id: number }>();
+  const problems: string[] = [];
+  const moves: D1PreparedStatement[] = [];
+
+  try {
+    const today = householdDate(env.HOUSEHOLD_TZ, now);
+    for (const user of await activeUsers(env)) {
+      try {
+        const { results: overdue } = await env.DB.prepare(
+          `SELECT a.id AS assignment_id, a.google_task_id, o.id AS occurrence_id, o.due_date
+           FROM assignments a
+           JOIN occurrences o ON o.id = a.occurrence_id
+           WHERE a.user_id = ? AND a.status = 'open' AND o.status = 'open' AND o.due_date < ?
+           ORDER BY a.id`,
+        )
+          .bind(user.id, today)
+          .all<OverdueAssignment>();
+        if (overdue.length === 0) continue;
+        const accessToken = overdue.some((r) => r.google_task_id) ? await accessTokenFor(env, user) : null;
+
+        for (const row of overdue) {
+          try {
+            const due = rolledDueDate(row.due_date, today);
+            // No task yet: sync's pushPendingTasks will create it with the new date.
+            if (row.google_task_id) await patchTask(accessToken!, user.tasklist_id, row.google_task_id, { due: toGoogleDue(due) });
+            moves.push(
+              env.DB.prepare("UPDATE occurrences SET due_date = ? WHERE id = ? AND status = 'open' AND due_date < ?").bind(
+                due,
+                row.occurrence_id,
+                due,
+              ),
+            );
+          } catch (err) {
+            problems.push(`user ${user.id}: assignment ${row.assignment_id}: ${describe(err)}`);
+          }
+        }
+      } catch (err) {
+        problems.push(`user ${user.id}: ${describe(err)}`);
+      }
+    }
+    if (moves.length > 0) await env.DB.batch(moves);
+  } catch (err) {
+    problems.push(`job: ${describe(err)}`);
+  }
+
+  if (problems.length > 0) console.warn("roll_forward problems:", problems.join("; "));
+  await env.DB.prepare("UPDATE job_runs SET finished_at = ?, ok = ?, error = ? WHERE id = ?")
+    .bind(new Date().toISOString(), problems.length === 0 ? 1 : 0, problems.join("; ") || null, run!.id)
+    .run();
 }
