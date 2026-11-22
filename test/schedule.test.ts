@@ -3,6 +3,8 @@ import {
   type ScheduleDuty,
   defaultLandingDay,
   firstDueDate,
+  firstOccurrence,
+  namedMonthsProblem,
   nextDueAfterSkip,
   nextDueDate,
   rolledDueDate,
@@ -325,5 +327,66 @@ describe("firstDueDate", () => {
 
   it("refuses an invalid today", () => {
     expect(() => firstDueDate(binsWeeklyAfter, "2026-11-31")).toThrow(/date/);
+  });
+});
+
+describe("firstOccurrence (a new duty, with an optional first-due date from the form)", () => {
+  const today = "2026-11-22"; // a Sunday
+
+  it("uses the requested first-due date as both slot and due date", () => {
+    expect(firstOccurrence(plantsMonthlyFixed, today, "2026-12-09")).toEqual({
+      slotDate: "2026-12-09",
+      dueDate: "2026-12-09",
+    });
+  });
+
+  it("a requested date of today stays today", () => {
+    expect(firstOccurrence(binsWeeklyFixed, today, today)).toEqual({ slotDate: today, dueDate: today });
+  });
+
+  it("a requested date in the past keeps it as the slot but is due today", () => {
+    expect(firstOccurrence(binsWeeklyFixed, today, "2026-11-14")).toEqual({
+      slotDate: "2026-11-14",
+      dueDate: today,
+    });
+  });
+
+  it("with no requested date, follows the no-history rules", () => {
+    expect(firstOccurrence(binsWeeklyFixed, today, null)).toEqual({ slotDate: "2026-11-28", dueDate: "2026-11-28" });
+    expect(firstOccurrence(acFilterFixed, today, undefined)).toEqual({
+      slotDate: "2027-04-03",
+      dueDate: "2027-04-03",
+    });
+    expect(firstOccurrence(plantsMonthlyAfter, today, "")).toEqual({ slotDate: today, dueDate: today });
+  });
+
+  it("refuses an impossible requested date", () => {
+    expect(() => firstOccurrence(binsWeeklyFixed, today, "2026-02-30")).toThrow(/date/);
+    expect(() => firstOccurrence(binsWeeklyFixed, today, "2026-12")).toThrow(/date/);
+  });
+});
+
+describe("namedMonthsProblem (checked by the form before saving)", () => {
+  it("accepts the right number of distinct months for fixed quarterly, twice-yearly and yearly duties", () => {
+    expect(namedMonthsProblem(gutterQuarterlyFixed)).toBeNull();
+    expect(namedMonthsProblem(acFilterFixed)).toBeNull();
+    expect(namedMonthsProblem({ cadence: "yearly", anchorMode: "fixed", cadenceMonths: [7] })).toBeNull();
+  });
+
+  it("explains a wrong count, a repeat or an out-of-range month", () => {
+    expect(namedMonthsProblem({ ...gutterQuarterlyFixed, cadenceMonths: [2, 5, 8] })).toMatch(/4 different months/);
+    expect(namedMonthsProblem({ ...acFilterFixed, cadenceMonths: [4, 4] })).toMatch(/2 different months/);
+    expect(namedMonthsProblem({ ...acFilterFixed, cadenceMonths: [] })).toMatch(/2 different months/);
+    expect(namedMonthsProblem({ ...acFilterFixed, cadenceMonths: null })).toMatch(/2 different months/);
+    expect(namedMonthsProblem({ cadence: "yearly", anchorMode: "fixed", cadenceMonths: [13] })).toMatch(
+      /1 month/,
+    );
+  });
+
+  it("needs no months for weekly, monthly or after-completion duties", () => {
+    expect(namedMonthsProblem(binsWeeklyFixed)).toBeNull();
+    expect(namedMonthsProblem(plantsMonthlyFixed)).toBeNull();
+    expect(namedMonthsProblem(acFilterAfter)).toBeNull();
+    expect(namedMonthsProblem({ ...gutterQuarterlyAfter, cadenceMonths: [1] })).toBeNull();
   });
 });

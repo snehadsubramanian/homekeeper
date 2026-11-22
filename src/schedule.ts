@@ -206,6 +206,41 @@ export function firstDueDate(duty: ScheduleDuty, today: string): string {
   return rolledDueDate(due, today);
 }
 
+/**
+ * Slot and due date of a new duty's first occurrence, from the form's
+ * optional first-due date. Given, it is the slot, and the due date unless it
+ * has passed (then today). Blank, the no-history rules of `firstDueDate` apply.
+ */
+export function firstOccurrence(
+  duty: ScheduleDuty,
+  today: string,
+  requestedFirstDue?: string | null,
+): { slotDate: string; dueDate: string } {
+  if (!requestedFirstDue) {
+    const due = firstDueDate({ ...duty, lastDoneDate: null, lastDonePrecision: "unknown" }, today);
+    return { slotDate: due, dueDate: due };
+  }
+  parseDate(requestedFirstDue);
+  return { slotDate: requestedFirstDue, dueDate: rolledDueDate(requestedFirstDue, today) };
+}
+
+/**
+ * Why a duty's named months can't be scheduled, or null if they can. Forms
+ * check this before saving, since the engine throws on bad months.
+ */
+export function namedMonthsProblem(duty: ScheduleDuty): string | null {
+  if (duty.anchorMode !== "fixed" || duty.cadence === "weekly" || duty.cadence === "monthly") return null;
+  try {
+    namedMonths(duty.cadence, duty.cadenceMonths);
+    return null;
+  } catch {
+    const expected = NAMED_MONTH_COUNT[duty.cadence];
+    return expected === 1
+      ? "A fixed yearly duty needs exactly 1 month."
+      : `A fixed ${duty.cadence === "quarterly" ? "quarterly" : "twice-yearly"} duty needs exactly ${expected} different months.`;
+  }
+}
+
 /** First due date for a duty with no known last-done date. */
 function firstDueWithoutHistory(duty: ScheduleDuty, today: string): string {
   if (duty.cadence === "weekly") return defaultLandingDay("weekly", today);
