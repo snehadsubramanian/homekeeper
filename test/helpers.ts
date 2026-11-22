@@ -172,5 +172,48 @@ export async function sessionCookie(userId: number, expiresAt = Math.floor(Date.
 }
 
 export async function resetDatabase() {
-  await env.DB.exec("DELETE FROM sync_log; DELETE FROM users; DELETE FROM job_runs;");
+  await env.DB.exec(
+    "DELETE FROM assignments; DELETE FROM occurrences; DELETE FROM duties; DELETE FROM users; DELETE FROM job_runs;",
+  );
+}
+
+/**
+ * Puts a duty straight into the database with one open occurrence and its
+ * assignment, as if created through the form. Made-up duties only.
+ */
+export async function seedDuty(opts: {
+  userId: number;
+  title?: string;
+  cadence?: string;
+  anchorMode?: string;
+  months?: number[] | null;
+  slotDate: string;
+  dueDate?: string;
+  /** null means the Google task hasn't been created yet. */
+  googleTaskId: string | null;
+}): Promise<{ dutyId: number; occurrenceId: number; assignmentId: number }> {
+  const duty = await env.DB.prepare(
+    `INSERT INTO duties (title, owner, owner_user_id, cadence, cadence_months, anchor_mode, last_done_precision, status, created_at)
+     VALUES (?, 'user', ?, ?, ?, ?, 'unknown', 'active', ?) RETURNING id`,
+  )
+    .bind(
+      opts.title ?? "Water the ferns",
+      opts.userId,
+      opts.cadence ?? "weekly",
+      opts.months ? JSON.stringify(opts.months) : null,
+      opts.anchorMode ?? "fixed",
+      new Date().toISOString(),
+    )
+    .first<{ id: number }>();
+  const occurrence = await env.DB.prepare(
+    "INSERT INTO occurrences (duty_id, slot_date, due_date, status) VALUES (?, ?, ?, 'open') RETURNING id",
+  )
+    .bind(duty!.id, opts.slotDate, opts.dueDate ?? opts.slotDate)
+    .first<{ id: number }>();
+  const assignment = await env.DB.prepare(
+    "INSERT INTO assignments (occurrence_id, user_id, google_task_id, status) VALUES (?, ?, ?, 'open') RETURNING id",
+  )
+    .bind(occurrence!.id, opts.userId, opts.googleTaskId)
+    .first<{ id: number }>();
+  return { dutyId: duty!.id, occurrenceId: occurrence!.id, assignmentId: assignment!.id };
 }
