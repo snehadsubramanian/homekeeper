@@ -331,7 +331,7 @@ describe("cron triggers", () => {
     expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM job_runs WHERE job = 'token_refresh'").first()).toEqual({ n: 0 });
   });
 
-  it("runs only the daily token check at 09:00 UTC", async () => {
+  it("runs the daily job, not sync, at 09:00 UTC", async () => {
     fakeGoogle({ lists: [{ id: LIST, title: "x" }], tasks: { [LIST]: [ticked("t1", "2026-11-14T14:30:00.000Z")] } });
     const userId = await insertUser({ refreshToken: "rt-alex", tasklistId: LIST });
     await seedDuty({ userId, slotDate: "2026-11-14", googleTaskId: "t1" });
