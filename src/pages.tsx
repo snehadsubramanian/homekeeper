@@ -89,28 +89,19 @@ export function PrivacyPage() {
   );
 }
 
-/** One line of the temporary Step 3 sync log, already formatted for display. */
-export interface SyncLogRow {
-  seen: string;
-  title: string;
-  status: string;
-  due: string;
-  completed: string;
-  flags: string;
-}
-
 export function HomePage({
   name,
   email,
   csrf,
   statusLines,
-  spike,
+  added,
 }: {
   name: string | null;
   email: string;
   csrf: string;
   statusLines: string[];
-  spike: { justCreated: boolean; lastSync: string; rows: SyncLogRow[] };
+  /** The duty just added through the form, if any. */
+  added: { title: string; dueDate: string; taskPending: boolean } | null;
 }) {
   return (
     <Layout title="homekeeper">
@@ -121,52 +112,124 @@ export function HomePage({
         <p>{line}</p>
       ))}
 
-      <section>
-        <h2>Round-trip test (temporary)</h2>
-        {spike.justCreated && (
-          <p>
-            <strong>Test task created for today.</strong> It shows in Google Calendar now, and in the log below after
-            the next sync (every 5 minutes).
-          </p>
-        )}
-        <form method="post" action="/spike/test-task">
-          <input type="hidden" name="_csrf" value={csrf} />
-          <button type="submit">Create test task</button>
-        </form>
-        <p>Last sync: {spike.lastSync}</p>
-        {spike.rows.length === 0 ? (
-          <p>Sync has not seen any changes yet.</p>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Seen</th>
-                <th>Task</th>
-                <th>Status</th>
-                <th>Due</th>
-                <th>Completed</th>
-                <th>Flags</th>
-              </tr>
-            </thead>
-            <tbody>
-              {spike.rows.map((r) => (
-                <tr>
-                  <td>{r.seen}</td>
-                  <td>{r.title}</td>
-                  <td>{r.status}</td>
-                  <td>{r.due}</td>
-                  <td>{r.completed}</td>
-                  <td>{r.flags}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
+      {added && (
+        <p>
+          <strong>
+            Added {added.title}. First task due {added.dueDate}.
+          </strong>
+          {added.taskPending
+            ? " Google Tasks could not be reached, so its task will be created at the next sync (within 5 minutes)."
+            : " It is in your Google Tasks list now."}
+        </p>
+      )}
+
+      <p>
+        <a href="/duties/new">Add a duty</a>
+      </p>
 
       <form method="post" action="/auth/logout">
         <input type="hidden" name="_csrf" value={csrf} />
         <button type="submit">Sign out</button>
+      </form>
+    </Layout>
+  );
+}
+
+/** What the duty form shows: blank for a new form, or as submitted when it is refused. */
+export interface DutyFormValues {
+  title: string;
+  cadence: string;
+  months: number[];
+  anchorMode: string;
+  firstDue: string;
+  /** One-time token: a second submit of the same form creates no second duty. */
+  formToken: string;
+}
+
+const CADENCE_LABELS: [string, string][] = [
+  ["weekly", "Weekly"],
+  ["monthly", "Monthly"],
+  ["quarterly", "Quarterly"],
+  ["semiannual", "Twice yearly"],
+  ["yearly", "Yearly"],
+];
+
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+export function DutyFormPage({ csrf, values, error }: { csrf: string; values: DutyFormValues; error?: string }) {
+  return (
+    <Layout title="Add a duty · homekeeper">
+      <h2>Add a duty</h2>
+      {error && (
+        <p role="alert">
+          <strong>{error}</strong>
+        </p>
+      )}
+      <form method="post" action="/duties" onsubmit="this.querySelector('button').disabled = true">
+        <input type="hidden" name="_csrf" value={csrf} />
+        <input type="hidden" name="form_token" value={values.formToken} />
+
+        <p>
+          <label>
+            Title <input name="title" value={values.title} required maxlength={200} />
+          </label>
+        </p>
+
+        <p>
+          <label>
+            Cadence{" "}
+            <select name="cadence">
+              {CADENCE_LABELS.map(([value, label]) => (
+                <option value={value} selected={values.cadence === value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </p>
+
+        <fieldset>
+          <legend>Schedule</legend>
+          <label>
+            <input type="radio" name="anchor_mode" value="fixed" checked={values.anchorMode !== "after_completion"} />{" "}
+            Fixed schedule (stays on its weeks or named months)
+          </label>
+          <br />
+          <label>
+            <input
+              type="radio"
+              name="anchor_mode"
+              value="after_completion"
+              checked={values.anchorMode === "after_completion"}
+            />{" "}
+            After completion (counts from when it was done)
+          </label>
+        </fieldset>
+
+        <fieldset>
+          <legend>Named months (fixed quarterly: 4, twice yearly: 2, yearly: 1)</legend>
+          {MONTH_NAMES.map((label, i) => (
+            <label>
+              <input type="checkbox" name="months" value={String(i + 1)} checked={values.months.includes(i + 1)} />{" "}
+              {label}{" "}
+            </label>
+          ))}
+        </fieldset>
+
+        <p>
+          <label>
+            First due (optional) <input type="date" name="first_due" value={values.firstDue} />
+          </label>
+          <br />
+          <small>
+            Leave blank to use the default: weekly duties on the next Saturday, fixed duties on the first Saturday of
+            their next named month, after-completion duties today.
+          </small>
+        </p>
+
+        <p>
+          <button type="submit">Add duty</button> <a href="/">Cancel</a>
+        </p>
       </form>
     </Layout>
   );
