@@ -156,6 +156,25 @@ const CADENCE_LABELS: [string, string][] = [
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+/**
+ * Shows the named-months section only when it applies: a fixed quarterly,
+ * twice-yearly or yearly duty. Hidden, it is also disabled, so its ticks
+ * aren't sent. Without scripts the section simply stays visible.
+ */
+const SHOW_NAMED_MONTHS = `(() => {
+  const months = document.getElementById("named-months");
+  const form = months.form;
+  const update = () => {
+    const usesMonths =
+      ["quarterly", "semiannual", "yearly"].includes(form.cadence.value) && form.anchor_mode.value === "fixed";
+    months.hidden = !usesMonths;
+    months.disabled = !usesMonths;
+  };
+  form.cadence.addEventListener("change", update);
+  for (const radio of form.anchor_mode) radio.addEventListener("change", update);
+  update();
+})();`;
+
 export function DutyFormPage({ csrf, values, error }: { csrf: string; values: DutyFormValues; error?: string }) {
   return (
     <Layout title="Add a duty · homekeeper">
@@ -206,7 +225,7 @@ export function DutyFormPage({ csrf, values, error }: { csrf: string; values: Du
           </label>
         </fieldset>
 
-        <fieldset>
+        <fieldset id="named-months">
           <legend>Named months (fixed quarterly: 4, twice yearly: 2, yearly: 1)</legend>
           {MONTH_NAMES.map((label, i) => (
             <label>
@@ -215,6 +234,7 @@ export function DutyFormPage({ csrf, values, error }: { csrf: string; values: Du
             </label>
           ))}
         </fieldset>
+        <script dangerouslySetInnerHTML={{ __html: SHOW_NAMED_MONTHS }} />
 
         <p>
           <label>

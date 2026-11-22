@@ -77,6 +77,19 @@ describe("GET /duties/new", () => {
     expect(first.formToken).not.toBe(second.formToken);
   });
 
+  it("shows named months only for fixed quarterly, twice-yearly and yearly duties", async () => {
+    const { cookie } = await signedIn();
+
+    const html = await (await app.request("/duties/new", { headers: { cookie } }, env)).text();
+
+    // The section is shown by default (so it works without scripts); a script hides it otherwise.
+    expect(html).toMatch(/<fieldset id="named-months">/);
+    const script = /<script>([\s\S]*?named-months[\s\S]*?)<\/script>/.exec(html)?.[1] ?? "";
+    for (const word of ["quarterly", "semiannual", "yearly", "fixed", "cadence", "anchor_mode"]) {
+      expect(script).toContain(word);
+    }
+  });
+
   it("sends signed-out visitors to sign in", async () => {
     const res = await app.request("/duties/new", {}, env);
     expect(res.status).toBe(302);
