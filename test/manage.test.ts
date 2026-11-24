@@ -176,6 +176,8 @@ describe("adding a duty with notes and links", () => {
     const { cookie } = await signedIn();
     const html = await page("/duties/new", cookie);
     expect(html).toContain('name="notes"');
+    expect(html).toContain("Description (optional)");
+    expect(html).not.toContain("Notes (optional)");
     expect(html).toContain('name="links"');
   });
 
@@ -210,14 +212,14 @@ describe("adding a duty with notes and links", () => {
     expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM duties").first<{ n: number }>())!.n).toBe(0);
   });
 
-  it("refuses notes that are too long", async () => {
+  it("refuses a description that is too long", async () => {
     const { cookie } = await signedIn();
     fakeGoogle();
 
     const res = await post("/duties", cookie, await addFields(cookie, { notes: "x".repeat(2001) }));
 
     expect(res.status).toBe(400);
-    expect(await res.text()).toContain("Please keep the notes under 2000 characters.");
+    expect(await res.text()).toContain("Please keep the description under 2000 characters.");
   });
 });
 

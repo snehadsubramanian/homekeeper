@@ -102,7 +102,7 @@ async function readForm(c: DutyContext): Promise<DutyFormValues> {
 function checkDuty(values: DutyFormValues): DutyInput | string {
   if (!values.title) return "Please enter a title.";
   if (values.title.length > 200) return "Please keep the title under 200 characters.";
-  if (values.notes.length > MAX_NOTES) return `Please keep the notes under ${MAX_NOTES} characters.`;
+  if (values.notes.length > MAX_NOTES) return `Please keep the description under ${MAX_NOTES} characters.`;
 
   const links = values.links
     .split(/\r?\n/)

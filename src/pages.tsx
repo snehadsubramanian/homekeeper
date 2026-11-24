@@ -295,7 +295,7 @@ export function DutyFormPage({
 
         <p>
           <label>
-            Notes (optional)
+            Description (optional)
             <br />
             <textarea name="notes" rows={3} cols={60} maxlength={2000}>
               {values.notes}
@@ -312,7 +312,7 @@ export function DutyFormPage({
             </textarea>
           </label>
           <br />
-          <small>Notes and links are copied into the Google task.</small>
+          <small>The description and links are copied into the Google task.</small>
         </p>
 
         <p>
