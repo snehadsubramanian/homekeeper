@@ -13,11 +13,26 @@ export function occurrenceMarker(occurrenceId: number): string {
   return `homekeeper occurrence ${occurrenceId}`;
 }
 
+/**
+ * A Google task's notes: the duty's notes, then its links one per line, then
+ * the occurrence marker, separated by blank lines. `links` is the stored JSON.
+ */
+export function taskNotes(notes: string | null, links: string | null, occurrenceId: number): string {
+  const parts: string[] = [];
+  if (notes) parts.push(notes);
+  const urls = links ? (JSON.parse(links) as string[]) : [];
+  if (urls.length > 0) parts.push(urls.join("\n"));
+  parts.push(occurrenceMarker(occurrenceId));
+  return parts.join("\n\n");
+}
+
 interface PendingAssignment {
   assignment_id: number;
   occurrence_id: number;
   due_date: string;
   title: string;
+  notes: string | null;
+  links: string | null;
 }
 
 /**
@@ -31,7 +46,7 @@ export async function pushPendingTasks(
   accessToken: string,
 ): Promise<{ created: number; problems: string[] }> {
   const { results } = await env.DB.prepare(
-    `SELECT a.id AS assignment_id, o.id AS occurrence_id, o.due_date, d.title
+    `SELECT a.id AS assignment_id, o.id AS occurrence_id, o.due_date, d.title, d.notes, d.links
      FROM assignments a
      JOIN occurrences o ON o.id = a.occurrence_id
      JOIN duties d ON d.id = o.duty_id
@@ -47,7 +62,7 @@ export async function pushPendingTasks(
     try {
       const task = await createTask(accessToken, user.tasklist_id, {
         title: pending.title,
-        notes: occurrenceMarker(pending.occurrence_id),
+        notes: taskNotes(pending.notes, pending.links, pending.occurrence_id),
         due: toGoogleDue(pending.due_date),
       });
       updates.push(
