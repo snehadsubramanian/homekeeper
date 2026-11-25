@@ -47,7 +47,7 @@ export interface FakeGoogleOptions {
   refreshErrors?: Record<string, string>;
   /** Tasks in each list, keyed by list id. */
   tasks?: Record<string, FakeTask[]>;
-  /** Task ids whose updates fail, mapped to the HTTP status. Returned, so a test can clear it. */
+  /** Task ids whose updates and deletes fail, mapped to the HTTP status. Returned, so a test can clear it. */
   patchErrors?: Record<string, number>;
 }
 
@@ -138,6 +138,16 @@ export function fakeGoogle(opts: FakeGoogleOptions = {}) {
         Object.assign(existing, JSON.parse(body) as Partial<FakeTask>, { updated: new Date().toISOString() });
         return Response.json(existing);
       }
+      if (oneTask && request.method === "DELETE") {
+        const taskId = decodeURIComponent(oneTask[2]!);
+        const status = patchErrors[taskId];
+        if (status) return Response.json({ error: { code: status } }, { status });
+        const existing = tasks[decodeURIComponent(oneTask[1]!)]?.find((t) => t.id === taskId && !t.deleted);
+        if (!existing) return Response.json({ error: { code: 404 } }, { status: 404 });
+        // Google keeps a deleted task, marked deleted, for lists that ask for showDeleted.
+        Object.assign(existing, { deleted: true, updated: new Date().toISOString() });
+        return new Response(null, { status: 204 });
+      }
       const one = url.pathname.startsWith(`${LISTS_PATH}/`) ? decodeURIComponent(url.pathname.slice(LISTS_PATH.length + 1)) : null;
       if (one && request.method === "GET") {
         const list = lists.find((l) => l.id === one);
@@ -204,17 +214,26 @@ export async function seedDuty(opts: {
   dueDate?: string;
   /** null means the Google task hasn't been created yet. */
   googleTaskId: string | null;
+  notes?: string | null;
+  links?: string[] | null;
+  /** Day-precision last completion; omitted means unknown. */
+  lastDoneDate?: string | null;
 }): Promise<{ dutyId: number; occurrenceId: number; assignmentId: number }> {
   const duty = await env.DB.prepare(
-    `INSERT INTO duties (title, owner, owner_user_id, cadence, cadence_months, anchor_mode, last_done_precision, status, created_at)
-     VALUES (?, 'user', ?, ?, ?, ?, 'unknown', 'active', ?) RETURNING id`,
+    `INSERT INTO duties (title, notes, links, owner, owner_user_id, cadence, cadence_months, anchor_mode,
+                         last_done_date, last_done_precision, status, created_at)
+     VALUES (?, ?, ?, 'user', ?, ?, ?, ?, ?, ?, 'active', ?) RETURNING id`,
   )
     .bind(
       opts.title ?? "Water the ferns",
+      opts.notes ?? null,
+      opts.links ? JSON.stringify(opts.links) : null,
       opts.userId,
       opts.cadence ?? "weekly",
       opts.months ? JSON.stringify(opts.months) : null,
       opts.anchorMode ?? "fixed",
+      opts.lastDoneDate ?? null,
+      opts.lastDoneDate ? "day" : "unknown",
       new Date().toISOString(),
     )
     .first<{ id: number }>();

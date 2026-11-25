@@ -28,6 +28,7 @@ async function call<T>(accessToken: string, url: string, init: RequestInit = {})
   if (init.body) headers["content-type"] = "application/json";
   const res = await fetch(url, { ...init, headers });
   if (!res.ok) throw new GoogleApiError(`Tasks API returned ${res.status}`, res.status);
+  if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
 
@@ -91,15 +92,20 @@ export function createTask(
   return call<GoogleTask>(accessToken, tasksUrl(listId).toString(), { method: "POST", body: JSON.stringify(task) });
 }
 
-/** Changes only the given fields of one task, e.g. its due date. */
+/** Changes only the given fields of one task, e.g. its due date or its title and notes. */
 export function patchTask(
   accessToken: string,
   listId: string,
   taskId: string,
-  fields: { due: string },
+  fields: { due?: string; title?: string; notes?: string },
 ): Promise<GoogleTask> {
   return call<GoogleTask>(accessToken, `${tasksUrl(listId)}/${encodeURIComponent(taskId)}`, {
     method: "PATCH",
     body: JSON.stringify(fields),
   });
+}
+
+/** Deletes one task. Google answers 404 if it is already gone; callers decide whether that matters. */
+export async function deleteTask(accessToken: string, listId: string, taskId: string): Promise<void> {
+  await call<undefined>(accessToken, `${tasksUrl(listId)}/${encodeURIComponent(taskId)}`, { method: "DELETE" });
 }

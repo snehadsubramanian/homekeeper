@@ -7,6 +7,7 @@ function Layout({ title, children }: { title: string; children: Child }) {
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>{title}</title>
+        <style>{"table{border-collapse:collapse}th,td{padding:4px 10px;text-align:left;border-bottom:1px solid #ddd}"}</style>
       </head>
       <body>
         <h1>homekeeper</h1>
@@ -89,12 +90,30 @@ export function PrivacyPage() {
   );
 }
 
+/** One row of the list view. */
+export interface DutyRow {
+  id: number;
+  title: string;
+  cadence: string;
+  cadenceMonths: number[] | null;
+  anchorMode: string;
+  lastDone: string | null;
+  /** The open occurrence's current date; null when paused. */
+  nextDue: string | null;
+  /** The open occurrence's original slot when it has passed, else null. */
+  overdueSince: string | null;
+  paused: boolean;
+}
+
 export function HomePage({
   name,
   email,
   csrf,
   statusLines,
   added,
+  notice,
+  duties,
+  overdueOnly,
 }: {
   name: string | null;
   email: string;
@@ -102,6 +121,10 @@ export function HomePage({
   statusLines: string[];
   /** The duty just added through the form, if any. */
   added: { title: string; dueDate: string; taskPending: boolean } | null;
+  /** Confirms an edit, pause, resume or delete. */
+  notice: string | null;
+  duties: DutyRow[];
+  overdueOnly: boolean;
 }) {
   return (
     <Layout title="homekeeper">
@@ -122,10 +145,46 @@ export function HomePage({
             : " It is in your Google Tasks list now."}
         </p>
       )}
+      {notice && (
+        <p>
+          <strong>{notice}</strong>
+        </p>
+      )}
 
+      <h2>Duties</h2>
       <p>
         <a href="/duties/new">Add a duty</a>
+        {" · "}
+        {overdueOnly ? <a href="/">Show all duties</a> : <a href="/?overdue=1">Show overdue only</a>}
       </p>
+      {duties.length === 0 ? (
+        <p>{overdueOnly ? "Nothing is overdue." : "No duties yet."}</p>
+      ) : (
+        <table>
+          <thead>
+            <tr>
+              <th>Duty</th>
+              <th>Cadence</th>
+              <th>Last done</th>
+              <th>Next due</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {duties.map((d) => (
+              <tr data-duty={String(d.id)}>
+                <td>
+                  <a href={`/duties/${d.id}`}>{d.title}</a>
+                </td>
+                <td>{cadenceLabel(d.cadence, d.cadenceMonths, d.anchorMode)}</td>
+                <td>{d.lastDone ?? "never"}</td>
+                <td>{d.paused ? "Paused" : (d.nextDue ?? "")}</td>
+                <td>{d.overdueSince && <strong>Overdue since {d.overdueSince}</strong>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
 
       <form method="post" action="/auth/logout">
         <input type="hidden" name="_csrf" value={csrf} />
@@ -141,8 +200,12 @@ export interface DutyFormValues {
   cadence: string;
   months: number[];
   anchorMode: string;
+  notes: string;
+  /** As typed: one link per line. */
+  links: string;
+  /** Adding only. */
   firstDue: string;
-  /** One-time token: a second submit of the same form creates no second duty. */
+  /** Adding only. One-time token: a second submit of the same form creates no second duty. */
   formToken: string;
 }
 
@@ -155,6 +218,13 @@ const CADENCE_LABELS: [string, string][] = [
 ];
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "Twice yearly in Apr, Oct, fixed" or "Weekly, after completion". */
+export function cadenceLabel(cadence: string, months: number[] | null, anchorMode: string): string {
+  const name = CADENCE_LABELS.find(([value]) => value === cadence)?.[1] ?? cadence;
+  const named = months && months.length > 0 ? ` in ${months.map((m) => MONTH_NAMES[m - 1]).join(", ")}` : "";
+  return `${name}${named}, ${anchorMode === "after_completion" ? "after completion" : "fixed"}`;
+}
 
 /**
  * Shows the named-months section only when it applies: a fixed quarterly,
@@ -175,23 +245,74 @@ const SHOW_NAMED_MONTHS = `(() => {
   update();
 })();`;
 
-export function DutyFormPage({ csrf, values, error }: { csrf: string; values: DutyFormValues; error?: string }) {
+/** What the edit page shows about a saved duty, beside the form. */
+export interface SavedDuty {
+  id: number;
+  paused: boolean;
+  lastDone: string | null;
+  nextDue: string | null;
+}
+
+/** The add form, or with `saved` the edit form plus pause/resume and delete. */
+export function DutyFormPage({
+  csrf,
+  values,
+  error,
+  saved,
+}: {
+  csrf: string;
+  values: DutyFormValues;
+  error?: string;
+  saved?: SavedDuty;
+}) {
+  const heading = saved ? "Edit duty" : "Add a duty";
   return (
-    <Layout title="Add a duty · homekeeper">
-      <h2>Add a duty</h2>
+    <Layout title={`${heading} · homekeeper`}>
+      <h2>{heading}</h2>
       {error && (
         <p role="alert">
           <strong>{error}</strong>
         </p>
       )}
-      <form method="post" action="/duties" onsubmit="this.querySelector('button').disabled = true">
+      {saved && (
+        <p>
+          Last done: {saved.lastDone ?? "never"}. {saved.paused ? "Paused." : `Next due: ${saved.nextDue ?? "not scheduled"}.`}
+        </p>
+      )}
+      <form
+        method="post"
+        action={saved ? `/duties/${saved.id}` : "/duties"}
+        onsubmit="this.querySelector('button[type=submit]').disabled = true"
+      >
         <input type="hidden" name="_csrf" value={csrf} />
-        <input type="hidden" name="form_token" value={values.formToken} />
+        {!saved && <input type="hidden" name="form_token" value={values.formToken} />}
 
         <p>
           <label>
             Title <input name="title" value={values.title} required maxlength={200} />
           </label>
+        </p>
+
+        <p>
+          <label>
+            Description (optional)
+            <br />
+            <textarea name="notes" rows={3} cols={60} maxlength={2000}>
+              {values.notes}
+            </textarea>
+          </label>
+        </p>
+
+        <p>
+          <label>
+            Links (optional, one per line)
+            <br />
+            <textarea name="links" rows={3} cols={60}>
+              {values.links}
+            </textarea>
+          </label>
+          <br />
+          <small>The description and links are copied into the Google task.</small>
         </p>
 
         <p>
@@ -236,6 +357,7 @@ export function DutyFormPage({ csrf, values, error }: { csrf: string; values: Du
         </fieldset>
         <script dangerouslySetInnerHTML={{ __html: SHOW_NAMED_MONTHS }} />
 
+        {!saved && (
         <p>
           <label>
             First due (optional) <input type="date" name="first_due" value={values.firstDue} />
@@ -246,21 +368,59 @@ export function DutyFormPage({ csrf, values, error }: { csrf: string; values: Du
             their next named month, after-completion duties today.
           </small>
         </p>
+        )}
+        {saved && (
+          <p>
+            <small>A schedule change applies from the next occurrence; the open task keeps its date.</small>
+          </p>
+        )}
 
         <p>
-          <button type="submit">Add duty</button> <a href="/">Cancel</a>
+          <button type="submit">{saved ? "Save changes" : "Add duty"}</button> <a href="/">Cancel</a>
         </p>
       </form>
+
+      {saved && saved.paused && (
+        <form method="post" action={`/duties/${saved.id}/resume`}>
+          <h3>Resume</h3>
+          <input type="hidden" name="_csrf" value={csrf} />
+          <label>
+            Next due (optional) <input type="date" name="next_due" />
+          </label>{" "}
+          <button type="submit">Resume</button>
+          <br />
+          <small>Leave blank to count from the last completion, or use the default landing day if it was never done.</small>
+        </form>
+      )}
+      {saved && !saved.paused && (
+        <form method="post" action={`/duties/${saved.id}/pause`}>
+          <input type="hidden" name="_csrf" value={csrf} />
+          <button type="submit">Pause</button> <small>Removes the open Google task until you resume.</small>
+        </form>
+      )}
+      {saved && (
+        <form
+          method="post"
+          action={`/duties/${saved.id}/delete`}
+          onsubmit="return confirm('Delete this duty? Its Google task is removed and it leaves the list.')"
+        >
+          <p>
+            <input type="hidden" name="_csrf" value={csrf} />
+            <button type="submit">Delete</button>
+          </p>
+        </form>
+      )}
     </Layout>
   );
 }
 
-export function MessagePage({ title, message }: { title: string; message: string }) {
+export function MessagePage({ title, message, back }: { title: string; message: string; back?: [string, string] }) {
+  const [href, label] = back ?? ["/signin", "Back to sign-in"];
   return (
     <Layout title={`${title} · homekeeper`}>
       <p>{message}</p>
       <p>
-        <a href="/signin">Back to sign-in</a>
+        <a href={href}>{label}</a>
       </p>
     </Layout>
   );
