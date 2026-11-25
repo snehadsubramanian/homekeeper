@@ -32,6 +32,14 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_NOTES = 2000;
 const MAX_LINKS = 10;
 const MAX_LINK_LENGTH = 2000;
+/**
+ * The longest a Google task's notes may be: the description, links and
+ * occurrence marker together. Google's limit is 8,192 characters (Tasks API
+ * reference, checked Nov 24, 2026); this stays safely under it.
+ */
+export const MAX_TASK_NOTES = 8000;
+/** The occurrence id used to measure the marker: longer than any real id. */
+const LONGEST_OCCURRENCE_ID = 999_999_999_999;
 
 const EMPTY_FORM: Omit<DutyFormValues, "formToken"> = {
   title: "",
@@ -121,6 +129,11 @@ function checkDuty(values: DutyFormValues): DutyInput | string {
     }
   }
 
+  const linksJson = links.length > 0 ? JSON.stringify(links) : null;
+  if (taskNotes(values.notes || null, linksJson, LONGEST_OCCURRENCE_ID).length > MAX_TASK_NOTES) {
+    return `The description and links together are too long for a Google task (about ${MAX_TASK_NOTES} characters at most). Please shorten the description or remove a link.`;
+  }
+
   const cadence = CADENCES.find((x) => x === values.cadence);
   if (!cadence) return "Please choose a cadence.";
   const anchorMode = ANCHOR_MODES.find((x) => x === values.anchorMode);
@@ -134,7 +147,7 @@ function checkDuty(values: DutyFormValues): DutyInput | string {
   return {
     title: values.title,
     notes: values.notes || null,
-    links: links.length > 0 ? JSON.stringify(links) : null,
+    links: linksJson,
     cadence,
     anchorMode,
     months,

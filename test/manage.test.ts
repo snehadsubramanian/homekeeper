@@ -1,6 +1,8 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../src/app";
+import { taskNotes } from "../src/assignments";
+import { MAX_TASK_NOTES } from "../src/duties";
 import { defaultLandingDay } from "../src/schedule";
 import { householdDate } from "../src/time";
 import { fakeGoogle, type FakeTask, insertUser, resetDatabase, seedDuty, sessionCookie } from "./helpers";
@@ -73,6 +75,20 @@ async function assignmentsOf(occurrenceId: number) {
 
 function googleCalls(google: ReturnType<typeof fakeGoogle>, method: string) {
   return google.calls.filter((c) => c.method === method && c.url.pathname.startsWith(TASKS_PATH));
+}
+
+/**
+ * A description and three links whose Google task notes come to exactly
+ * MAX_TASK_NOTES characters (with the longest occurrence marker the form
+ * allows for), plus `extra` characters.
+ */
+function notesNear(extra: number): { notes: string; links: string } {
+  const description = "d".repeat(2000);
+  const link = (length: number) => `https://example.com/${"a".repeat(length - 20)}`;
+  const fixed = [link(1990), link(1990)];
+  const without = taskNotes(description, JSON.stringify([...fixed, ""]), 999_999_999_999).length;
+  const third = link(MAX_TASK_NOTES - without + extra);
+  return { notes: description, links: [...fixed, third].join("\n") };
 }
 
 beforeEach(resetDatabase);
@@ -221,6 +237,31 @@ describe("adding a duty with notes and links", () => {
     expect(res.status).toBe(400);
     expect(await res.text()).toContain("Please keep the description under 2000 characters.");
   });
+
+  it("refuses a description and links too long together for a Google task", async () => {
+    const { cookie } = await signedIn();
+    const google = fakeGoogle();
+
+    const res = await post("/duties", cookie, await addFields(cookie, notesNear(1)));
+
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("The description and links together are too long for a Google task");
+    expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM duties").first<{ n: number }>())!.n).toBe(0);
+    expect(googleCalls(google, "POST")).toHaveLength(0);
+  });
+
+  it("accepts a description and links that just fit, and Google gets all of them", async () => {
+    const { cookie } = await signedIn();
+    const google = fakeGoogle();
+    const fits = notesNear(0);
+
+    const res = await post("/duties", cookie, await addFields(cookie, fits));
+
+    expect(res.status).toBe(303);
+    const created = JSON.parse(googleCalls(google, "POST")[0]!.body) as { notes: string };
+    expect(created.notes.length).toBeLessThanOrEqual(MAX_TASK_NOTES);
+    expect(created.notes).toContain(fits.links.split("\n")[2]);
+  });
 });
 
 describe("editing a duty", () => {
@@ -364,6 +405,21 @@ describe("editing a duty", () => {
     expect(blank.status).toBe(400);
     expect(await blank.text()).toContain("Please enter a title.");
     expect((await duty(d.dutyId))!.cadence).toBe("weekly");
+  });
+
+  it("refuses a description and links too long together, without calling Google", async () => {
+    const { userId, cookie } = await signedIn();
+    const d = await seedDuty({ userId, slotDate: FUTURE, googleTaskId: "t1" });
+    const google = fakeGoogle({ tasks: { [LIST]: [googleTask("t1")] } });
+
+    const res = await post(`/duties/${d.dutyId}`, cookie, await editFields(cookie, notesNear(1)));
+
+    expect(res.status).toBe(400);
+    const html = await res.text();
+    expect(html).toContain("The description and links together are too long for a Google task");
+    expect(html).not.toContain("could not be reached");
+    expect((await duty(d.dutyId))!.notes).toBeNull();
+    expect(googleCalls(google, "PATCH")).toHaveLength(0);
   });
 
   it("refuses a request without a valid CSRF token", async () => {
